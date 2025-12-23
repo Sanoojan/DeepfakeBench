@@ -5,3 +5,9 @@
 *.pth
 *.pt
 *.dat
+wandb/*
+logs/*
+wandb_artifacts.py
+Terminal_outputs/*
+visualizations/*
+training/pretrained/pretrained.zip

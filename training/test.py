@@ -31,6 +31,7 @@ from trainer.trainer import Trainer
 from detectors import DETECTOR
 from metrics.base_metrics_class import Recorder
 from collections import defaultdict
+from metrics.utils import patch_score_visualize
 
 import argparse
 from logger import create_logger
@@ -89,11 +90,15 @@ def choose_metric(config):
     return metric_scoring
 
 
-def test_one_dataset(model, data_loader):
+def test_one_dataset(model, data_loader, visualize_patchwise=False):
     prediction_lists = []
     feature_lists = []
     label_lists = []
+    patch_scores_all = []
+    all_batch_inputs = []
     for i, data_dict in tqdm(enumerate(data_loader), total=len(data_loader)):
+        if len(data_dict['image'].shape)==5:
+            data_dict['image']=data_dict['image'].reshape(-1,data_dict['image'].shape[2],data_dict['image'].shape[3],data_dict['image'].shape[4])
         # get data
         data, label, mask, landmark = \
         data_dict['image'], data_dict['label'], data_dict['mask'], data_dict['landmark']
@@ -106,14 +111,29 @@ def test_one_dataset(model, data_loader):
             data_dict['landmark'] = landmark.to(device)
 
         # model forward without considering gradient computation
-        predictions = inference(model, data_dict)
+        if visualize_patchwise:
+            predictions = model(data_dict, return_patch_scores=True)
+            patch_scores_all.append(predictions['patch_scores'].cpu().detach())
+            all_batch_inputs.append(data_dict['image'].cpu().detach())
+        
+        else:
+            predictions = model(data_dict)
+        
+        # breakpoint()
         label_lists += list(data_dict['label'].cpu().detach().numpy())
         prediction_lists += list(predictions['prob'].cpu().detach().numpy())
         feature_lists += list(predictions['feat'].cpu().detach().numpy())
     
+    if visualize_patchwise:
+        breakpoint()
+        y_true = np.array(label_lists)
+        y_pred = np.array(prediction_lists)
+
+        patch_scores_all = torch.cat(patch_scores_all, dim=0)
+        patch_score_visualize(torch.cat(all_batch_inputs, dim=0)[:,:-3].cpu(), y_true, patch_scores_all, y_pred,save_dir=os.path.join("visualizations/patch_scores", f"DFDC"), fps=5,apply_softmax=False)
     return np.array(prediction_lists), np.array(label_lists),np.array(feature_lists)
     
-def test_epoch(model, test_data_loaders):
+def test_epoch(model, test_data_loaders, visualize_patchwise=False):
     # set model to eval mode
     model.eval()
 
@@ -125,7 +145,7 @@ def test_epoch(model, test_data_loaders):
     for key in keys:
         data_dict = test_data_loaders[key].dataset.data_dict
         # compute loss for each dataset
-        predictions_nps, label_nps,feat_nps = test_one_dataset(model, test_data_loaders[key])
+        predictions_nps, label_nps,feat_nps = test_one_dataset(model, test_data_loaders[key], visualize_patchwise=visualize_patchwise)
         
         # compute metric for each dataset
         metric_one_dataset = get_test_metrics(y_pred=predictions_nps, y_true=label_nps,
@@ -161,7 +181,7 @@ def main():
     if args.weights_path:
         config['weights_path'] = args.weights_path
         weights_path = args.weights_path
-    
+    visualize_patchwise = config.get('visualize_patchwise', False)
     # init seed
     init_seed(config)
 
@@ -181,14 +201,25 @@ def main():
             epoch = int(weights_path.split('/')[-1].split('.')[0].split('_')[2])
         except:
             epoch = 0
+        # breakpoint()
         ckpt = torch.load(weights_path, map_location=device)
-        model.load_state_dict(ckpt, strict=True)
-        print('===> Load checkpoint done!')
-    else:
-        print('Fail to load the pre-trained weights')
+        try:
+            model.load_state_dict(ckpt, strict=True)
+            print('===> Load checkpoint done!')
+
+        except Exception as e:
+            print(f'Failed to load checkpoint: {e}')
+            print('use flesxible loading')
+            new_state = {}
+            for k, v in ckpt.items():
+                new_k = k.replace("module.", "")  # remove the DDP prefix
+                new_state[new_k] = v
+
+            model.load_state_dict(new_state, strict=True)
+                
     
     # start testing
-    best_metric = test_epoch(model, test_data_loaders)
+    best_metric = test_epoch(model, test_data_loaders, visualize_patchwise=visualize_patchwise)
     print('===> Test Done!')
 
 if __name__ == '__main__':

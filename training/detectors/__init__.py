@@ -39,8 +39,9 @@ from .pcl_xception_detector import PCLXceptionDetector
 from .iid_detector import IIDDetector
 from .lrl_detector import LRLDetector
 from .rfm_detector import RFMDetector
-from .uia_vit_detector import UIAViTDetector
+# from .uia_vit_detector import UIAViTDetector
 from .multi_attention_detector import MultiAttentionDetector
 from .sia_detector import SIADetector
-from .tall_detector import TALLDetector
+# from .tall_detector import TALLDetector
 from .effort_detector import EffortDetector
+from .dino_detector import DINODetector

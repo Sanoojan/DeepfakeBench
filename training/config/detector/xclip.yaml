@@ -1,5 +1,5 @@
 # log dir 
-log_dir: /data/home/zhiyuanyan/DeepfakeBench/logs_debug/xclip
+log_dir: logs_debug/xclip
 
 # model setting
 pretrained: /Youtu_Pangu_Security_Public/youtu-pangu-public/zhiyuanyan/DeepfakeBench/training/pretrained/xception-b5690688.pth   # path to a pre-trained model, if using one
@@ -16,7 +16,7 @@ backbone_config:
 # dataset
 all_dataset: [FaceForensics++, FF-F2F, FF-DF, FF-FS, FF-NT, FaceShifter, DeepFakeDetection, Celeb-DF-v1, Celeb-DF-v2, DFDCP, DFDC, DeeperForensics-1.0, UADFV, roop]
 train_dataset: [FaceForensics++]
-test_dataset: [roop]
+test_dataset: [DFDC]
 
 compression: c23  # compression-level for videos
 train_batchSize: 8   # training batch size

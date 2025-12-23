@@ -34,11 +34,13 @@ from detectors import DETECTOR
 from dataset import *
 from metrics.utils import parse_metric_for_print
 from logger import create_logger, RankFilter
+import wandb
+
 
 
 parser = argparse.ArgumentParser(description='Process some paths.')
 parser.add_argument('--detector_path', type=str,
-                    default='/data/home/zhiyuanyan/DeepfakeBenchv2/training/config/detector/sbi.yaml',
+                    default='training/config/detector/clip.yaml',
                     help='path to detector YAML file')
 parser.add_argument("--train_dataset", nargs="+")
 parser.add_argument("--test_dataset", nargs="+")
@@ -47,8 +49,10 @@ parser.add_argument('--no-save_feat', dest='save_feat', action='store_false', de
 parser.add_argument("--ddp", action='store_true', default=False)
 parser.add_argument('--local_rank', type=int, default=0)
 parser.add_argument('--task_target', type=str, default="", help='specify the target of current training task')
+parser.add_argument('--test_name', type=str, default="Debug", help='specify the name of current testing dataset')
 args = parser.parse_args()
 torch.cuda.set_device(args.local_rank)
+
 
 
 def init_seed(config):
@@ -157,9 +161,13 @@ def prepare_testing_data(config):
 
 def choose_optimizer(model, config):
     opt_name = config['optimizer']['type']
+    if config['optimizer'].get('calssifier_only', False):
+        params = model.head.parameters()
+    else:
+        params = model.parameters()
     if opt_name == 'sgd':
         optimizer = optim.SGD(
-            params=model.parameters(),
+            params=params,
             lr=config['optimizer'][opt_name]['lr'],
             momentum=config['optimizer'][opt_name]['momentum'],
             weight_decay=config['optimizer'][opt_name]['weight_decay']
@@ -167,7 +175,7 @@ def choose_optimizer(model, config):
         return optimizer
     elif opt_name == 'adam':
         optimizer = optim.Adam(
-            params=model.parameters(),
+            params=params,
             lr=config['optimizer'][opt_name]['lr'],
             weight_decay=config['optimizer'][opt_name]['weight_decay'],
             betas=(config['optimizer'][opt_name]['beta1'], config['optimizer'][opt_name]['beta2']),
@@ -177,7 +185,7 @@ def choose_optimizer(model, config):
         return optimizer
     elif opt_name == 'sam':
         optimizer = SAM(
-            model.parameters(), 
+            params, 
             optim.SGD, 
             lr=config['optimizer'][opt_name]['lr'],
             momentum=config['optimizer'][opt_name]['momentum'],
@@ -242,7 +250,7 @@ def main():
     config['save_ckpt'] = args.save_ckpt
     config['save_feat'] = args.save_feat
     if config['lmdb']:
-        config['dataset_json_folder'] = 'preprocessing/dataset_json_v3'
+        config['dataset_json_folder'] = 'preprocessing/dataset_json'
     # create logger
     timenow=datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
     task_str = f"_{config['task_target']}" if config.get('task_target', None) is not None else ""
@@ -263,7 +271,9 @@ def main():
 
     # init seed
     init_seed(config)
-
+    
+    
+    
     # set cudnn benchmark if needed
     if config['cudnn']:
         cudnn.benchmark = True
@@ -274,12 +284,18 @@ def main():
             timeout=timedelta(minutes=30)
         )
         logger.addFilter(RankFilter(0))
+    
+    if args.ddp and dist.get_rank() == 0:
+        wandb.init(project="DeepfakeBench", name=args.test_name, config=vars(args)) 
+    elif not args.ddp:
+        wandb.init(project="DeepfakeBench", name=args.test_name, config=vars(args))
     # prepare the training data loader
     train_data_loader = prepare_training_data(config)
 
     # prepare the testing data loader
     test_data_loaders = prepare_testing_data(config)
 
+    
     # prepare the model (detector)
     model_class = DETECTOR[config['model_name']]
     model = model_class(config)
@@ -289,16 +305,17 @@ def main():
 
     # prepare the scheduler
     scheduler = choose_scheduler(config, optimizer)
-
+    
     # prepare the metric
     metric_scoring = choose_metric(config)
-
+    
     # prepare the trainer
     trainer = Trainer(config, model, optimizer, scheduler, logger, metric_scoring, time_now=timenow)
-
+    
     # start training
     for epoch in range(config['start_epoch'], config['nEpochs'] + 1):
         trainer.model.epoch = epoch
+        
         best_metric = trainer.train_epoch(
                     epoch=epoch,
                     train_data_loader=train_data_loader,

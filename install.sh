@@ -1,7 +1,7 @@
 #!/bin/bash
 
 pip install numpy==1.21.5
-pip install pandas==1.4.2
+pip install pandas==1.3.5
 pip install Pillow==9.0.1
 pip install dlib==19.24.0
 pip install imageio==2.9.0

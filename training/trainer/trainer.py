@@ -30,7 +30,8 @@ from torch import distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from sklearn import metrics
 from metrics.utils import get_test_metrics
-
+from metrics.utils import visualize_batch
+import wandb
 FFpp_pool=['FaceForensics++','FF-DF','FF-F2F','FF-FS','FF-NT']#
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -50,7 +51,7 @@ class Trainer(object):
         # check if all the necessary components are implemented
         if config is None or model is None or optimizer is None or logger is None:
             raise ValueError("config, model, optimizier, logger, and tensorboard writer must be implemented")
-
+        
         self.config = config
         self.model = model
         self.optimizer = optimizer
@@ -64,11 +65,13 @@ class Trainer(object):
             lambda: defaultdict(lambda: float('-inf')
             if self.metric_scoring != 'eer' else float('inf'))
         )
+        
         self.speed_up()  # move model to GPU
-
+        
         # get current time
         self.timenow = time_now
         # create directory path
+        
         if 'task_target' not in config:
             self.log_dir = os.path.join(
                 self.config['log_dir'],
@@ -102,13 +105,14 @@ class Trainer(object):
     def speed_up(self):
         self.model.to(device)
         self.model.device = device
+        
         if self.config['ddp'] == True:
             num_gpus = torch.cuda.device_count()
             print(f'avai gpus: {num_gpus}')
             # local_rank=[i for i in range(0,num_gpus)]
             self.model = DDP(self.model, device_ids=[self.config['local_rank']],find_unused_parameters=True, output_device=self.config['local_rank'])
             #self.optimizer =  nn.DataParallel(self.optimizer, device_ids=[int(os.environ['LOCAL_RANK'])])
-
+            
     def setTrain(self):
         self.model.train()
         self.train = True
@@ -183,8 +187,15 @@ class Trainer(object):
     def train_step(self,data_dict):
         if self.config['optimizer']['type']=='sam':
             for i in range(2):
+                if len(data_dict['image'].shape)==5:
+                    data_dict['image']=data_dict['image'].reshape(-1,data_dict['image'].shape[2],data_dict['image'].shape[3],data_dict['image'].shape[4])
                 predictions = self.model(data_dict)
                 losses = self.model.get_losses(data_dict, predictions)
+                if (self.config['ddp'] and dist.get_rank() == 0):
+                    wandb.log({f"train/loss_{k}": v.item() for k, v in losses.items()})
+                elif not self.config['ddp']:
+                    wandb.log({f"train/loss_{k}": v.item() for k, v in losses.items()})
+                
                 if i == 0:
                     pred_first = predictions
                     losses_first = losses
@@ -196,12 +207,19 @@ class Trainer(object):
                     self.optimizer.second_step(zero_grad=True)
             return losses_first, pred_first
         else:
-
+            # breakpoint()
+            if len(data_dict['image'].shape)==5:
+                data_dict['image']=data_dict['image'].reshape(-1,data_dict['image'].shape[2],data_dict['image'].shape[3],data_dict['image'].shape[4])
             predictions = self.model(data_dict)
             if type(self.model) is DDP:
                 losses = self.model.module.get_losses(data_dict, predictions)
             else:
                 losses = self.model.get_losses(data_dict, predictions)
+            
+            if (self.config['ddp'] and dist.get_rank() == 0):
+                    wandb.log({f"train/loss_{k}": v.item() for k, v in losses.items()})
+            elif not self.config['ddp']:
+                wandb.log({f"train/loss_{k}": v.item() for k, v in losses.items()})
             self.optimizer.zero_grad()
             losses['overall'].backward()
             self.optimizer.step()
@@ -235,7 +253,8 @@ class Trainer(object):
         # define training recorder
         train_recorder_loss = defaultdict(Recorder)
         train_recorder_metric = defaultdict(Recorder)
-
+        zero_shot = True
+        
         for iteration, data_dict in tqdm(enumerate(train_data_loader),total=len(train_data_loader)):
             self.setTrain()
             # more elegant and more scalable way of moving data to GPU
@@ -263,6 +282,28 @@ class Trainer(object):
             ## store loss
             for name, value in losses.items():
                 train_recorder_loss[name].update(value)
+
+            if zero_shot:    # zero shot
+                if test_data_loaders is not None and (not self.config['ddp'] ):
+                    self.logger.info("===> Test start!")
+                    test_best_metric = self.test_epoch(
+                        epoch,
+                        iteration,
+                        test_data_loaders,
+                        step_cnt,
+                    )
+                elif test_data_loaders is not None and (self.config['ddp'] and dist.get_rank() == 0):
+                    self.logger.info("===> Test start!")
+                    test_best_metric = self.test_epoch(
+                        epoch,
+                        iteration,
+                        test_data_loaders,
+                        step_cnt,
+                    )
+                else:
+                    test_best_metric = None
+                zero_shot = False   
+              
 
             # run tensorboard to visualize the training process
             if iteration % 300 == 0 and self.config['local_rank']==0:
@@ -322,7 +363,9 @@ class Trainer(object):
                     )
                 else:
                     test_best_metric = None
-
+                
+                # wandb.log({f"test/best_{k}": v.item() for k, v in test_best_metric.items()})
+            # total_start_time = time.time()  
                     # total_end_time = time.time()
             # total_elapsed_time = total_end_time - total_start_time
             # print("总花费的时间: {:.2f} 秒".format(total_elapsed_time))
@@ -355,6 +398,9 @@ class Trainer(object):
                 if data_dict[key]!=None:
                     data_dict[key]=data_dict[key].cuda()
             # model forward without considering gradient computation
+            # breakpoint()
+            if len(data_dict['image'].shape)==5:
+                data_dict['image']=data_dict['image'].reshape(-1,data_dict['image'].shape[2],data_dict['image'].shape[3],data_dict['image'].shape[4])
             predictions = self.inference(data_dict)
             label_lists += list(data_dict['label'].cpu().detach().numpy())
             prediction_lists += list(predictions['prob'].cpu().detach().numpy())
@@ -410,11 +456,13 @@ class Trainer(object):
             # tensorboard-2. metric
             writer = self.get_writer('test', key, k)
             writer.add_scalar(f'test_metrics/{k}', v, global_step=step)
+            wandb.log({f"test_best/{key}_{k}": v, "epoch": epoch, "iteration": iteration, "step": step})
         if 'pred' in metric_one_dataset:
             acc_real, acc_fake = self.get_respect_acc(metric_one_dataset['pred'], metric_one_dataset['label'])
             metric_str += f'testing-metric, acc_real:{acc_real}; acc_fake:{acc_fake}'
             writer.add_scalar(f'test_metrics/acc_real', acc_real, global_step=step)
             writer.add_scalar(f'test_metrics/acc_fake', acc_fake, global_step=step)
+            wandb.log({f"test_best/{key}_acc_real": acc_real, f"test/{key}_acc_fake": acc_fake, "epoch": epoch, "iteration": iteration, "step": step})
         self.logger.info(metric_str)
     def test_epoch(self, epoch, iteration, test_data_loaders, step):
         # set model to eval mode
@@ -437,6 +485,8 @@ class Trainer(object):
             # print(f'stack len:{predictions_nps.shape};{label_nps.shape};{len(data_dict["image"])}')
             losses_all_datasets[key] = losses_one_dataset_recorder
             metric_one_dataset=get_test_metrics(y_pred=predictions_nps,y_true=label_nps,img_names=data_dict['image'])
+            # {'acc': acc, 'auc': auc, 'eer': eer, 'ap': ap, 'pred': y_pred, 'video_auc': v_auc, 'label': y_true}
+            wandb.log({f"test/{key}_{k}": v for k, v in metric_one_dataset.items()})
             for metric_name, value in metric_one_dataset.items():
                 if metric_name in avg_metric:
                     avg_metric[metric_name]+=value

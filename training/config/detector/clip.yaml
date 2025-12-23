@@ -1,5 +1,5 @@
 # log dir 
-log_dir: /data/home/zhiyuanyan/DeepfakeBench/logs_debug/clip
+log_dir: logs_debug/clip
 
 # model setting
 pretrained: /data/home/zhiyuanyan/DeepfakeBench/training/pretrained/xception-b5690688.pth   # path to a pre-trained model, if using one
@@ -16,11 +16,14 @@ backbone_config:
 # dataset
 all_dataset: [FaceForensics++, FF-F2F, FF-DF, FF-FS, FF-NT, FaceShifter, DeepFakeDetection, Celeb-DF-v1, Celeb-DF-v2, DFDCP, DFDC, DeeperForensics-1.0, UADFV]
 train_dataset: [FaceForensics++]
-test_dataset: [FaceForensics++, DeepFakeDetection]
+test_dataset: [FaceForensics++, Celeb-DF-v1, Celeb-DF-v2, DFDCP, DFDC, UADFV]
+# test_dataset: [DFDC]
 
+video_mode: true
+clip_size: 16
 compression: c23  # compression-level for videos
-train_batchSize: 32   # training batch size
-test_batchSize: 32   # test batch size
+train_batchSize: 8   # training batch size
+test_batchSize: 8    # test batch size
 workers: 8   # number of data loading workers
 frame_num: {'train': 32, 'test': 32}   # number of frames to use per video in training and testing
 resolution: 224   # resolution of output image to network
@@ -43,15 +46,21 @@ data_aug:
   quality_upper: 100
 
 # mean and std for normalization
-mean: [0.5, 0.5, 0.5]
-std: [0.5, 0.5, 0.5]
+# mean: [0.5, 0.5, 0.5]
+# std: [0.5, 0.5, 0.5]
+mean: [0.48145466, 0.4578275, 0.40821073]
+std: [0.26862954, 0.26130258, 0.27577711]
+
+classifier: PatchClassifierCNN3D  # choose between 'linear', 'PatchTemporalClassifier','ClsDiffClassifier' , 'PatchClassifierCNN3D','PatchTemporalClassifierCNN3D' and 'PatchClassifier'
 
 # optimizer config
 optimizer:
   # choose between 'adam' and 'sgd'
+  calssifier_only: true
   type: adam
   adam:
-    lr: 0.0002  # learning rate
+    # lr: 0.000005 # learning rate
+    lr: 0.001 # learning rate
     beta1: 0.9  # beta1 for Adam optimizer
     beta2: 0.999 # beta2 for Adam optimizer
     eps: 0.00000001  # epsilon for Adam optimizer
@@ -76,6 +85,12 @@ save_feat: true   # whether to save features
 # loss function
 loss_func: cross_entropy   # loss function to use
 losstype: null
+additional_losses: [All_layer_CE]  # additional loss functions to use {options: [KL_loss, Selected_layer_CE, All_layer_CE]}
+KL_loss:
+  temperature: 2.0
+  alpha: 0.5
+Selected_layer_CE:
+  layer: 0
 
 # metric
 metric_scoring: auc   # metric for evaluation (auc, acc, eer, ap)
@@ -84,3 +99,8 @@ metric_scoring: auc   # metric for evaluation (auc, acc, eer, ap)
 
 cuda: true   # whether to use CUDA acceleration
 cudnn: true   # whether to use CuDNN for convolution operations
+visualize_patchwise: true  # whether to visualize patchwise scores
+
+# other inference params
+
+apply_layernorm: false  # whether to apply LayerNorm to the input of transformer

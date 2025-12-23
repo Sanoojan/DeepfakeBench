@@ -1,8 +1,8 @@
 mode: train
-lmdb: True
+lmdb: False
 dry_run: false
-rgb_dir: './datasets/rgb'
-lmdb_dir:  './datasets/lmdb'
+rgb_dir: './DeepfakeDatasets/rgb'
+lmdb_dir:  './DeepfakeDatasets/lmdb'
 dataset_json_folder: './preprocessing/dataset_json'
 SWA: False
 save_avg: True
@@ -39,5 +39,5 @@ label_dict:
   UADFV_Fake: 1
   UADFV_Real: 0
   # Roop
-  roop_Real: 0
-  roop_Fake: 1
+  # roop_Real: 0
+  # roop_Fake: 1

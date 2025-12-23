@@ -1,0 +1,97 @@
+# log dir
+log_dir: logs_debug/dino
+
+# model setting
+pretrained: null
+model_name: dino
+backbone_name: vit
+
+# backbone setting
+backbone_config:
+  mode: original
+  num_classes: 2
+  inc: 3
+  dropout: false
+
+# DINO backbone
+dino_model: vit_base_patch16_dinov3
+feat_dim: 768
+
+# dataset
+all_dataset: [FaceForensics++, FF-F2F, FF-DF, FF-FS, FF-NT, FaceShifter, DeepFakeDetection, Celeb-DF-v1, Celeb-DF-v2, DFDCP, DFDC, DeeperForensics-1.0, UADFV]
+train_dataset: [FaceForensics++]
+test_dataset: [FaceForensics++, Celeb-DF-v1, Celeb-DF-v2, DFDCP, DFDC, UADFV]
+
+video_mode: true
+clip_size: 16
+compression: c23
+train_batchSize: 8
+test_batchSize: 8
+workers: 8
+frame_num: {'train': 32, 'test': 32}
+resolution: 256
+with_mask: false
+with_landmark: false
+
+# data augmentation
+use_data_augmentation: true
+data_aug:
+  flip_prob: 0.5
+  rotate_prob: 0.5
+  rotate_limit: [-10, 10]
+  blur_prob: 0.5
+  blur_limit: [3, 7]
+  brightness_prob: 0.5
+  brightness_limit: [-0.1, 0.1]
+  contrast_limit: [-0.1, 0.1]
+  quality_lower: 40
+  quality_upper: 100
+
+# ImageNet normalization (IMPORTANT for DINO)
+mean: [0.485, 0.456, 0.406]
+std: [0.229, 0.224, 0.225]
+
+classifier: linear # choose between 'linear', 'PatchTemporalClassifier','ClsDiffClassifier' , 'PatchClassifierCNN3D','PatchTemporalClassifierCNN3D' and 'PatchClassifier'
+
+
+# optimizer config
+optimizer:
+  calssifier_only: true
+  type: adam
+  adam:
+    lr: 0.001
+    beta1: 0.9
+    beta2: 0.999
+    eps: 0.00000001
+    weight_decay: 0.0005
+    amsgrad: false
+
+# training config
+lr_scheduler: null
+nEpochs: 10
+start_epoch: 0
+save_epoch: 1
+rec_iter: 100
+logdir: ./logs
+manualSeed: 1024
+save_ckpt: true
+save_feat: true
+
+# loss function
+loss_func: cross_entropy
+losstype: null
+
+Additional_losses: []  # additional loss functions to use {options: [KL_loss, Selected_layer_CE, All_layer_CE]}
+KL_loss:
+  temperature: 2.0
+  alpha: 0.5
+Selected_layer_CE:
+  layer: 11
+
+# metric
+metric_scoring: auc
+
+# cuda
+cuda: true
+cudnn: true
+visualize_patchwise: true
