@@ -184,7 +184,7 @@ class Trainer(object):
             pickle.dump(metric_one_dataset, file)
         self.logger.info(f"Metrics saved to {file_path}")
 
-    def train_step(self,data_dict):
+    def train_step(self,data_dict,epoch=None):
         if self.config['optimizer']['type']=='sam':
             for i in range(2):
                 if len(data_dict['image'].shape)==5:
@@ -212,9 +212,9 @@ class Trainer(object):
                 data_dict['image']=data_dict['image'].reshape(-1,data_dict['image'].shape[2],data_dict['image'].shape[3],data_dict['image'].shape[4])
             predictions = self.model(data_dict)
             if type(self.model) is DDP:
-                losses = self.model.module.get_losses(data_dict, predictions)
+                losses = self.model.module.get_losses(data_dict, predictions,epoch=epoch)
             else:
-                losses = self.model.get_losses(data_dict, predictions)
+                losses = self.model.get_losses(data_dict, predictions,epoch=epoch)
             
             if (self.config['ddp'] and dist.get_rank() == 0):
                     wandb.log({f"train/loss_{k}": v.item() for k, v in losses.items()})
@@ -258,11 +258,19 @@ class Trainer(object):
         for iteration, data_dict in tqdm(enumerate(train_data_loader),total=len(train_data_loader)):
             self.setTrain()
             # more elegant and more scalable way of moving data to GPU
+            print(data_dict.keys())
+            video_name=None
+            # if 'video_name' in data_dict.keys():
+            #     video_name=data_dict['video_name'].copy()
+            #     data_dict.pop('video_name')
             for key in data_dict.keys():
                 if data_dict[key]!=None and key!='name':
+                    # breakpoint()
+                    
                     data_dict[key]=data_dict[key].cuda()
-
-            losses,predictions=self.train_step(data_dict)
+            # if video_name is not None:
+            #     data_dict['video_name']=video_name
+            losses,predictions=self.train_step(data_dict,epoch=epoch)
 
             # update learning rate
 
@@ -368,7 +376,7 @@ class Trainer(object):
             # total_start_time = time.time()  
                     # total_end_time = time.time()
             # total_elapsed_time = total_end_time - total_start_time
-            # print("总花费的时间: {:.2f} 秒".format(total_elapsed_time))
+        
             step_cnt += 1
         return test_best_metric
 
@@ -382,7 +390,7 @@ class Trainer(object):
 
         return acc_real, acc_fake
 
-    def test_one_dataset(self, data_loader):
+    def test_one_dataset(self, data_loader,epoch=None):
         # define test recorder
         test_recorder_loss = defaultdict(Recorder)
         prediction_lists = []
@@ -408,9 +416,9 @@ class Trainer(object):
             if type(self.model) is not AveragedModel:
                 # compute all losses for each batch data
                 if type(self.model) is DDP:
-                    losses = self.model.module.get_losses(data_dict, predictions)
+                    losses = self.model.module.get_losses(data_dict, predictions,epoch=epoch)
                 else:
-                    losses = self.model.get_losses(data_dict, predictions)
+                    losses = self.model.get_losses(data_dict, predictions,epoch=epoch)
 
                 # store data by recorder
                 for name, value in losses.items():
@@ -481,7 +489,7 @@ class Trainer(object):
             self.save_data_dict('test', data_dict, key)
 
             # compute loss for each dataset
-            losses_one_dataset_recorder, predictions_nps, label_nps, feature_nps = self.test_one_dataset(test_data_loaders[key])
+            losses_one_dataset_recorder, predictions_nps, label_nps, feature_nps = self.test_one_dataset(test_data_loaders[key],epoch=epoch)
             # print(f'stack len:{predictions_nps.shape};{label_nps.shape};{len(data_dict["image"])}')
             losses_all_datasets[key] = losses_one_dataset_recorder
             metric_one_dataset=get_test_metrics(y_pred=predictions_nps,y_true=label_nps,img_names=data_dict['image'])

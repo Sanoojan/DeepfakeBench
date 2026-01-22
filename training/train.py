@@ -161,7 +161,7 @@ def prepare_testing_data(config):
 
 def choose_optimizer(model, config):
     opt_name = config['optimizer']['type']
-    if config['optimizer'].get('calssifier_only', False):
+    if config['optimizer'].get('classifier_only', False):
         params = model.head.parameters()
     else:
         params = model.parameters()
@@ -259,6 +259,10 @@ def main():
                 config['model_name'] + task_str + '_' + timenow
             )
     os.makedirs(logger_path, exist_ok=True)
+    # save config.yaml in logger path
+    with open(os.path.join(logger_path, 'config.yaml'), 'w') as f:
+        yaml.dump(config, f)
+    
     logger = create_logger(os.path.join(logger_path, 'training.log'))
     logger.info('Save log to {}'.format(logger_path))
     config['ddp']= args.ddp

@@ -129,101 +129,243 @@ def visualize_batch(images, save_path="grid.png"):
     print(f"[Saved] {save_path}")
     
     
+# def patch_score_visualize(
+#     X, 
+#     y, 
+#     scores,
+#     preds, 
+#     save_dir="vis_scores", 
+#     fps=25,
+#     apply_softmax=True
+# ):
+#     """
+#     X: video frames, shape (B, T, C, H, W) or (B, C, H, W)
+#     y: labels
+#     scores: patch scores (B, T, N)
+#     preds: predicted score for naming files
+#     """
+#     os.makedirs(save_dir, exist_ok=True)
+
+#     # -----------------------------
+#     #  CLIP mean/std
+#     # -----------------------------
+#     clip_mean = torch.tensor([0.48145466, 0.4578275, 0.40821073]).view(1,3,1,1)
+#     clip_std  = torch.tensor([0.26862954, 0.26130258, 0.27577711]).view(1,3,1,1)
+
+#     # -----------------------------
+#     # Normalize shapes
+#     # -----------------------------
+#     # breakpoint()
+#     if X.shape[0] != scores.shape[0]:
+#         assert False, "Batch size mismatch between X and scores"
+        
+#     if X.dim() == 4:
+#         X = X.unsqueeze(1)              # (B,1,C,H,W)
+#         scores = scores.unsqueeze(1)    # (B,1,N)
+
+#     B, T, C, H, W = X.shape
+#     N = scores.shape[-1]
+#     S = int(N ** 0.5)
+#     # breakpoint()
+#     # -----------------------------
+#     # Optional softmax across N patches
+#     # -----------------------------
+#     if apply_softmax:
+#         scores = torch.softmax(scores, dim=-1)
+
+#     # -----------------------------
+#     # Global normalization 
+#     # across ALL videos, ALL frames
+#     # -----------------------------
+#     global_min = scores.min().item()
+#     global_max = scores.max().item()
+#     global_range = global_max - global_min + 1e-6
+
+#     print(f"Global score min={global_min:.4f}, max={global_max:.4f}")
+
+#     if len(scores.shape)==4:
+#         scores = scores.reshape(B, T, N)
+    
+#     # -----------------------------
+#     # Generate video per batch item
+#     # -----------------------------
+#     for b in range(B):
+
+#         out_path = os.path.join(save_dir, f"{b}_{int(y[b])}_{float(preds[b]):.4f}.mp4")
+#         writer = cv2.VideoWriter(
+#             out_path,
+#             cv2.VideoWriter_fourcc(*"mp4v"),
+#             fps,
+#             (W, H)
+#         )
+
+#         for t in range(T):
+#             frame = X[b, t]  # (C,H,W)
+
+#             # ---------------------------------------------------
+#             # 1. Denormalize CLIP
+#             # ---------------------------------------------------
+#             f = frame.unsqueeze(0)
+#             f = f * clip_std + clip_mean
+#             f = f.clamp(0, 1)
+#             img = (f[0].permute(1,2,0).cpu().numpy() * 255).astype(np.uint8)
+
+#             # ---------------------------------------------------
+#             # 2. Patch score → heatmap
+#             # ---------------------------------------------------
+#             patch = scores[b, t]  # (N,)
+
+#             # GLOBAL normalization
+#             heat = (patch - global_min) / global_range
+#             heat = heat.reshape(S, S).cpu().numpy()
+
+#             # resize to full frame
+#             heat = cv2.resize(heat, (W, H), interpolation=cv2.INTER_CUBIC)
+
+#             heat_color = cv2.applyColorMap((heat * 255).astype(np.uint8), cv2.COLORMAP_JET)
+#             heat_color = cv2.cvtColor(heat_color, cv2.COLOR_BGR2RGB)
+
+#             # ---------------------------------------------------
+#             # 3. Overlay
+#             # ---------------------------------------------------
+#             overlay = (0.45 * heat_color + 0.55 * img).astype(np.uint8)
+#             writer.write(cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR))
+
+#         writer.release()
+
+#     print(f"Saved to: {save_dir}")
+    
 def patch_score_visualize(
-    X, 
-    y, 
+    X,
+    y,
     scores,
-    preds, 
-    save_dir="vis_scores", 
+    preds,
+    save_dir="vis_scores",
+    apply_softmax=False,
     fps=25,
-    apply_softmax=True
+    video_names=None
 ):
     """
     X: video frames, shape (B, T, C, H, W) or (B, C, H, W)
-    y: labels
-    scores: patch scores (B, T, N)
-    preds: predicted score for naming files
+    y: labels, shape (B,)
+    scores: patch logits, shape (B, T, N)
+    preds: video-level prediction (for naming files), shape (B,)
     """
+
+    import os
+    import cv2
+    import torch
+    import numpy as np
+
     os.makedirs(save_dir, exist_ok=True)
 
     # -----------------------------
-    #  CLIP mean/std
+    # CLIP mean/std
     # -----------------------------
-    clip_mean = torch.tensor([0.48145466, 0.4578275, 0.40821073]).view(1,3,1,1)
-    clip_std  = torch.tensor([0.26862954, 0.26130258, 0.27577711]).view(1,3,1,1)
+    clip_mean = torch.tensor(
+        [0.48145466, 0.4578275, 0.40821073],
+        device=X.device
+    ).view(1, 3, 1, 1)
+
+    clip_std = torch.tensor(
+        [0.26862954, 0.26130258, 0.27577711],
+        device=X.device
+    ).view(1, 3, 1, 1)
 
     # -----------------------------
     # Normalize shapes
     # -----------------------------
     if X.dim() == 4:
-        X = X.unsqueeze(1)              # (B,1,C,H,W)
-        scores = scores.unsqueeze(1)    # (B,1,N)
+        X = X.unsqueeze(1)           # (B,1,C,H,W)
+        scores = scores.unsqueeze(1) # (B,1,N)
 
     B, T, C, H, W = X.shape
     N = scores.shape[-1]
     S = int(N ** 0.5)
+    assert S * S == N, "N must be a perfect square"
 
     # -----------------------------
-    # Optional softmax across N patches
+    # Move to CPU (once)
     # -----------------------------
-    if apply_softmax:
-        scores = torch.softmax(scores, dim=-1)
+    X = X.detach().cpu()
+    scores = scores.detach().cpu()
+  
 
     # -----------------------------
-    # Global normalization 
-    # across ALL videos, ALL frames
+    # GLOBAL normalization (B×T×N)
     # -----------------------------
-    global_min = scores.min().item()
-    global_max = scores.max().item()
-    global_range = global_max - global_min + 1e-6
+    scores_relu = torch.relu(scores)           # (B,T,N)
+    global_min = scores_relu.min()
+    global_max = scores_relu.max()
 
-    print(f"Global score min={global_min:.4f}, max={global_max:.4f}")
+    # Avoid degenerate scaling
+    if (global_max - global_min) < 1e-6:
+        global_max = global_min + 1e-6
 
     # -----------------------------
-    # Generate video per batch item
+    # Generate video per sample
     # -----------------------------
+    # breakpoint()
     for b in range(B):
 
-        out_path = os.path.join(save_dir, f"{b}_{int(y[b])}_{float(preds[b]):.4f}.mp4")
+        out_path = os.path.join(
+            save_dir, f"gt{int(y[b])}_pred{float(preds[b]):.4f}_in{b}_name{video_names[b][0]}.mp4"
+        )
+
         writer = cv2.VideoWriter(
             out_path,
             cv2.VideoWriter_fourcc(*"mp4v"),
             fps,
-            (W, H)
+            (W, H),
         )
 
         for t in range(T):
+            # ---------------------------------
+            # 1. Denormalize CLIP image
+            # ---------------------------------
             frame = X[b, t]  # (C,H,W)
-
-            # ---------------------------------------------------
-            # 1. Denormalize CLIP
-            # ---------------------------------------------------
             f = frame.unsqueeze(0)
             f = f * clip_std + clip_mean
             f = f.clamp(0, 1)
-            img = (f[0].permute(1,2,0).cpu().numpy() * 255).astype(np.uint8)
 
-            # ---------------------------------------------------
-            # 2. Patch score → heatmap
-            # ---------------------------------------------------
-            patch = scores[b, t]  # (N,)
+            img = (
+                f[0]
+                .permute(1, 2, 0)
+                .numpy()
+            )  # RGB [0,1]
 
-            # GLOBAL normalization
-            heat = (patch - global_min) / global_range
-            heat = heat.reshape(S, S).cpu().numpy()
+            # ---------------------------------
+            # 2. Patch logits → heatmap
+            # ---------------------------------
+            patch = torch.relu(scores[b, t])   # (N,)
 
-            # resize to full frame
-            heat = cv2.resize(heat, (W, H), interpolation=cv2.INTER_CUBIC)
+            heat = (patch - global_min) / (global_max - global_min)
+            heat = heat.clamp(0, 1)
 
-            heat_color = cv2.applyColorMap((heat * 255).astype(np.uint8), cv2.COLORMAP_JET)
-            heat_color = cv2.cvtColor(heat_color, cv2.COLOR_BGR2RGB)
+            heat = heat.reshape(S, S).numpy()
+            heat = cv2.resize(
+                heat, (W, H), interpolation=cv2.INTER_CUBIC
+            )
 
-            # ---------------------------------------------------
+            heat_color = cv2.applyColorMap(
+                (heat * 255).astype(np.uint8),
+                cv2.COLORMAP_JET
+            )
+            heat_color = cv2.cvtColor(
+                heat_color, cv2.COLOR_BGR2RGB
+            ).astype(np.float32) / 255.0
+
+            # ---------------------------------
             # 3. Overlay
-            # ---------------------------------------------------
-            overlay = (0.45 * heat_color + 0.55 * img).astype(np.uint8)
-            writer.write(cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR))
+            # ---------------------------------
+            overlay = 0.45 * heat_color + 0.55 * img
+            # overlay=img
+            overlay = (overlay * 255).astype(np.uint8)
+
+            writer.write(
+                cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR)
+            )
 
         writer.release()
 
-    print(f"Saved to: {save_dir}")
+    print(f"Saved visualizations to: {save_dir}")

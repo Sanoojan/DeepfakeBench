@@ -35,6 +35,7 @@ from metrics.utils import patch_score_visualize
 
 import argparse
 from logger import create_logger
+import wandb
 
 parser = argparse.ArgumentParser(description='Process some paths.')
 parser.add_argument('--detector_path', type=str, 
@@ -44,9 +45,19 @@ parser.add_argument("--test_dataset", nargs="+")
 parser.add_argument('--weights_path', type=str, 
                     default='/mntcephfs/lab_data/zhiyuanyan/benchmark_results/auc_draw/cnn_aug/resnet34_2023-05-20-16-57-22/test/FaceForensics++/ckpt_epoch_9_best.pth')
 #parser.add_argument("--lmdb", action='store_true', default=False)
+parser.add_argument('--test_name', type=str, default='', help='name of this test')
+parser.add_argument('--debug', action='store_true', default=False, help='debug mode')
+parser.add_argument('--save_patch_scores', action='store_true', default=False, help='whether to save patch scores for visualization')
+parser.add_argument('--visualize_patchwise', action='store_true', default=False, help='whether to visualize patchwise scores')
 args = parser.parse_args()
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+wandb.init(
+    project="DeepfakeBench",
+    name=args.test_name,
+    config=vars(args)
+)
 
 def init_seed(config):
     if config['manualSeed'] is None:
@@ -90,12 +101,13 @@ def choose_metric(config):
     return metric_scoring
 
 
-def test_one_dataset(model, data_loader, visualize_patchwise=False):
+def test_one_dataset(model, data_loader, visualize_patchwise=False,dataset_name=None):
     prediction_lists = []
     feature_lists = []
     label_lists = []
     patch_scores_all = []
     all_batch_inputs = []
+    video_names = []
     for i, data_dict in tqdm(enumerate(data_loader), total=len(data_loader)):
         if len(data_dict['image'].shape)==5:
             data_dict['image']=data_dict['image'].reshape(-1,data_dict['image'].shape[2],data_dict['image'].shape[3],data_dict['image'].shape[4])
@@ -111,10 +123,11 @@ def test_one_dataset(model, data_loader, visualize_patchwise=False):
             data_dict['landmark'] = landmark.to(device)
 
         # model forward without considering gradient computation
-        if visualize_patchwise:
+        if visualize_patchwise or args.save_patch_scores:
             predictions = model(data_dict, return_patch_scores=True)
             patch_scores_all.append(predictions['patch_scores'].cpu().detach())
             all_batch_inputs.append(data_dict['image'].cpu().detach())
+            video_names.append(data_dict['video_name'])
         
         else:
             predictions = model(data_dict)
@@ -125,12 +138,30 @@ def test_one_dataset(model, data_loader, visualize_patchwise=False):
         feature_lists += list(predictions['feat'].cpu().detach().numpy())
     
     if visualize_patchwise:
-        breakpoint()
+        # breakpoint()
         y_true = np.array(label_lists)
         y_pred = np.array(prediction_lists)
-
+        
+        
+        all_patch_inputs = torch.cat(all_batch_inputs, dim=0).cpu()
+        
         patch_scores_all = torch.cat(patch_scores_all, dim=0)
-        patch_score_visualize(torch.cat(all_batch_inputs, dim=0)[:,:-3].cpu(), y_true, patch_scores_all, y_pred,save_dir=os.path.join("visualizations/patch_scores", f"DFDC"), fps=5,apply_softmax=False)
+        
+        all_patch_inputs = all_patch_inputs.reshape(patch_scores_all.shape[0], -1, all_patch_inputs.shape[1], all_patch_inputs.shape[2], all_patch_inputs.shape[3])
+        patch_score_visualize(all_patch_inputs, y_true, patch_scores_all, y_pred,save_dir=os.path.join("visualizations/patch_scores", args.test_name, f"{dataset_name}"), fps=5,video_names=video_names)
+    if args.save_patch_scores:
+        save_path = os.path.join("visualizations/saved_patch_scores", args.test_name,f"{dataset_name}.pkl")
+        
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        
+        with open(save_path, 'wb') as f:
+            pickle.dump({
+                'patch_scores': patch_scores_all,
+                'labels': label_lists,
+                'predictions': prediction_lists
+            }, f)
+        print(f'Saved patch scores to {save_path}')
+    
     return np.array(prediction_lists), np.array(label_lists),np.array(feature_lists)
     
 def test_epoch(model, test_data_loaders, visualize_patchwise=False):
@@ -145,7 +176,7 @@ def test_epoch(model, test_data_loaders, visualize_patchwise=False):
     for key in keys:
         data_dict = test_data_loaders[key].dataset.data_dict
         # compute loss for each dataset
-        predictions_nps, label_nps,feat_nps = test_one_dataset(model, test_data_loaders[key], visualize_patchwise=visualize_patchwise)
+        predictions_nps, label_nps,feat_nps = test_one_dataset(model, test_data_loaders[key], visualize_patchwise=visualize_patchwise,dataset_name=key)
         
         # compute metric for each dataset
         metric_one_dataset = get_test_metrics(y_pred=predictions_nps, y_true=label_nps,
@@ -156,6 +187,7 @@ def test_epoch(model, test_data_loaders, visualize_patchwise=False):
         tqdm.write(f"dataset: {key}")
         for k, v in metric_one_dataset.items():
             tqdm.write(f"{k}: {v}")
+            wandb.log({f"test_best/{key}_{k}": v})
 
     return metrics_all_datasets
 
@@ -181,7 +213,7 @@ def main():
     if args.weights_path:
         config['weights_path'] = args.weights_path
         weights_path = args.weights_path
-    visualize_patchwise = config.get('visualize_patchwise', False)
+    visualize_patchwise =   args.visualize_patchwise
     # init seed
     init_seed(config)
 
@@ -220,6 +252,14 @@ def main():
     
     # start testing
     best_metric = test_epoch(model, test_data_loaders, visualize_patchwise=visualize_patchwise)
+    print(best_metric)
+    # average video_auc
+    video_aucs = []
+    for dataset_name in best_metric:
+        video_aucs.append(best_metric[dataset_name]['video_auc'])
+    avg_video_auc = sum(video_aucs)/len(video_aucs)
+    print(f'Average video AUC: {avg_video_auc}')
+    wandb.log({"test_best/avg_video_auc": avg_video_auc})
     print('===> Test Done!')
 
 if __name__ == '__main__':

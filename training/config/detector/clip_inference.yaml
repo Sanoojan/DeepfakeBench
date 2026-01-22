@@ -19,17 +19,17 @@ backbone_config:
 all_dataset: [FaceForensics++, FF-F2F, FF-DF, FF-FS, FF-NT, FaceShifter, DeepFakeDetection, Celeb-DF-v1, Celeb-DF-v2, DFDCP, DFDC, DeeperForensics-1.0, UADFV]
 train_dataset: [FaceForensics++]
 test_dataset: [FaceForensics++, Celeb-DF-v1, Celeb-DF-v2, DFDCP, DFDC, UADFV]
-# test_dataset: [Celeb-DF-v1]
+# test_dataset: [DFDC]
 
 video_mode: true
-clip_size: 16
+clip_size: 32
 compression: c23  # compression-level for videos
-train_batchSize: 4   # training batch size
-test_batchSize: 4 # test batch size
+train_batchSize: 1   # training batch size
+test_batchSize: 1  # test batch size
 workers: 8   # number of data loading workers
 frame_num: {'train': 32, 'test': 32}   # number of frames to use per video in training and testing
 resolution: 224   # resolution of output image to network
-with_mask: true   # whether to include mask information in the input
+with_mask: false   # whether to include mask information in the input
 with_landmark: false   # whether to include facial landmark information in the input
 with_flow: false   # whether to include optical flow information in the input
 
@@ -55,16 +55,15 @@ std: [0.26862954, 0.26130258, 0.27577711]
 
 classifier: PatchClS_3DConv_TopKFrame  # choose between 'linear', 'PatchTemporalClassifier','ClsDiffClassifier' , 'PatchClassifierCNN3D','PatchTemporalClassifierCNN3D', 'PatchClassifier3D2Conv' and 'PatchClassifier', 'PatchClassifierCNN3D_ATTN', 'PatchClassifier3DConv_TopK'
 topk_percent: 0.1
-spatio_temporal_patches: true  # whether to use spatio-temporal patches in PatchClassifier3DConv_TopK
-
+spatio_temporal_patches: true
 # optimizer config
 optimizer:
   # choose between 'adam' and 'sgd'
-  classifier_only: true  # whether to optimize only the classifier parameters
+  classifier_only: true
   type: adam
   adam:
     # lr: 0.000005 # learning rate
-    lr: 0.0005  # learning rate # classiafier only 0.0005  # full model 0.000005
+    lr: 0.0005 # learning rate
     beta1: 0.9  # beta1 for Adam optimizer
     beta2: 0.999 # beta2 for Adam optimizer
     eps: 0.00000001  # epsilon for Adam optimizer
@@ -77,7 +76,7 @@ optimizer:
 
 # training config
 lr_scheduler: null   # learning rate scheduler
-nEpochs: 15   # number of epochs to train for
+nEpochs: 20   # number of epochs to train for
 start_epoch: 0   # manual epoch number (useful for restarts)
 save_epoch: 1   # interval epochs for saving models
 rec_iter: 100   # interval iterations for recording
@@ -89,7 +88,7 @@ save_feat: true   # whether to save features
 # loss function
 loss_func: cross_entropy   # loss function to use
 losstype: null
-additional_losses: [All_layer_CE,Patch_frame_MIL_ranking_all]  # additional loss functions to use {options: [KL_loss, Selected_layer_CE, All_layer_CE,Patch_MIL,Patch_Xray]}
+additional_losses: [All_layer_CE]  # additional loss functions to use {options: [KL_loss, Selected_layer_CE, All_layer_CE,Patch_MIL,Patch_Xray]}
 KL_loss:
   temperature: 2.0
   alpha: 0.5
@@ -106,54 +105,20 @@ Patch_Xray_CE:
 Patch_Temporal_Xray:
   alpha: 0.2
   window: 3        # temporal window size
-  k: 5  
-Patch_Xray:
-  alpha: 0.3        # moderate auxiliary strength
-  k: 10             # top-K patches × frames (MIL)  
+  k: 5    
 Patch_consistency_loss:
-  alpha: 0.1
+  alpha: 0.02
   window: 3
   use_sigmoid_weight: false
-  use_variance: false
+  use_variance: true
   variance_weight: 1.0
-  use_difference: false
-  use_corr: true
-  corr_weight: 1.0
-  fake_patch_only: false
-  fake_topk: 30
-  fake_thresh: none
-Patch_frame_CE:
-  alpha: 0.5
-  topk_percent: 0.2
-All_layer_CE:
-  ranking_margin: 1.0
-  use_ranking_loss: false
-  use_mean_pred: true
-  CE_alpha: 0.0
-
-
 Patch_continuity_loss:
   alpha: 0.02
   topk: 5
   spatial_radius: 1
 Patch_continuity_flow_loss:
-  alpha: 0.02 
+  alpha: 0.02
   conf_thresh: 0.6
-Patch_frame_MIL_ranking:
-  alpha: 1.0
-  margin: 1.0
-  use_variable_margin: true
-  use_sigmoid: false
-  random_pairs: 500
-
-Patch_frame_MIL_ranking_all:
-  alpha: 1.0
-  margin: 1.0
-  use_variable_margin: true
-  use_sigmoid: false
-  topk_percent: 0.1
-
-  
 
 # metric
 metric_scoring: auc   # metric for evaluation (auc, acc, eer, ap)

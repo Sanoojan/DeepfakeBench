@@ -491,7 +491,86 @@ class PatchClassifierCNN3D(nn.Module):
         # output: [B, 2, T, N1, N1]
         # -----------------------------------------
         out3d = self.agg3d(patch_grid)
+        patch_scores_prob= out3d.softmax(dim=1)[:,1,:,:,:].squeeze(1) # [B, T, N1, N1]
+        patch_scores = patch_scores_prob.view(B, T, N)  # [B, T
+        # -----------------------------------------
+        # 4. Global average pool → [B, 2]
+        # -----------------------------------------
+        video_scores = out3d.mean(dim=(2, 3, 4))
 
+        if return_patch_scores:
+            # return patch_scores as [B, T, N]
+            return video_scores, patch_scores
+
+        return video_scores
+    
+class PatchClassifier3D2Conv(nn.Module):
+    def __init__(self, D, hidden_dim=128):
+        super().__init__()
+
+        # FC per patch → 1 logit
+        self.patch_fc = nn.Sequential(
+            nn.Linear(D, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, 1)
+        )
+
+        # 3D conv aggregator
+        # input: B, 1, T, N1, N1
+        self.intermediate_temp = nn.Sequential(
+            nn.Conv3d(
+                in_channels=1,
+                out_channels=1,
+                kernel_size=(3, 3, 3),   
+                padding=(1, 1, 1)      
+            ),
+            nn.ReLU()
+        )
+        
+        self.agg3d = nn.Sequential(
+            nn.Conv3d(
+                in_channels=1,
+                out_channels=8,
+                kernel_size=(3, 3, 3),   
+                padding=(1, 1, 1)      
+            ),
+            nn.ReLU(),
+            nn.Conv3d(8, 2, kernel_size=1)
+        )
+
+    def forward(self, x, return_patch_scores=False):
+        """
+        x: [B, T, N, D]
+        """
+        B, T, N, D = x.shape
+        N1 = int(math.sqrt(N))
+        assert N1 * N1 == N, f"N={N} is not a perfect square!"
+
+        # -----------------------------------------
+        # 1. FC per patch → patch_logits: [B, T, N, 1]
+        # -----------------------------------------
+        x_flat = x.reshape(B*T*N, D)
+        patch_flat = self.patch_fc(x_flat)  # [B*T*N, 1]
+        patch_scores = patch_flat.view(B, T, N)   # [B, T, N]
+
+        # -----------------------------------------
+        # 2. Reshape into spatial grid: [B, T, N1, N1]
+        # -----------------------------------------
+        patch_grid = patch_scores.view(B, T, N1, N1)
+
+        # Add channel dim → [B, 1, T, N1, N1]
+        patch_grid = patch_grid.unsqueeze(1)
+
+        # -----------------------------------------
+        # 3. 3D conv aggregation
+        # output: [B, 2, T, N1, N1]
+        # -----------------------------------------
+        temp_out = self.intermediate_temp(patch_grid)
+        patch_scores = temp_out.squeeze(1)  # [B, T, N1, N1]
+        patch_scores = patch_scores.view(B, T, N)  # [B, T, N]
+        out3d = self.agg3d(temp_out)
+        # patch_scores_prob= out3d.softmax(dim=1)[:,1,:,:,:].squeeze(1) # [B, T, N1, N1]
+        # patch_scores = patch_scores_prob.view(B, T, N)  # [B, T
         # -----------------------------------------
         # 4. Global average pool → [B, 2]
         # -----------------------------------------
@@ -503,8 +582,8 @@ class PatchClassifierCNN3D(nn.Module):
 
         return video_scores
 
-class PatchTemporalClassifierCNN3D(nn.Module):
-    def __init__(self, D, hidden_dim=128,lag=1):
+class PatchClassifierCNN3D(nn.Module):
+    def __init__(self, D, hidden_dim=128):
         super().__init__()
 
         # FC per patch → 1 logit
@@ -517,11 +596,15 @@ class PatchTemporalClassifierCNN3D(nn.Module):
         # 3D conv aggregator
         # input: B, 1, T, N1, N1
         self.agg3d = nn.Sequential(
-            nn.Conv3d(1, 8, kernel_size=3, padding=1),
+            nn.Conv3d(
+                in_channels=1,
+                out_channels=8,
+                kernel_size=(3, 3, 3),   
+                padding=(1, 1, 1)      
+            ),
             nn.ReLU(),
-            nn.Conv3d(8, 2, kernel_size=1)   # output channels = 2
+            nn.Conv3d(8, 2, kernel_size=1)
         )
-        self.lag = lag
 
     def forward(self, x, return_patch_scores=False):
         """
@@ -529,21 +612,19 @@ class PatchTemporalClassifierCNN3D(nn.Module):
         """
         B, T, N, D = x.shape
         N1 = int(math.sqrt(N))
-        
         assert N1 * N1 == N, f"N={N} is not a perfect square!"
 
         # -----------------------------------------
         # 1. FC per patch → patch_logits: [B, T, N, 1]
         # -----------------------------------------
-        x= x[:, self.lag:] - x[:, :-self.lag]  # temporal difference
-        x_flat = x.reshape(B*(T-self.lag)*N, D)
+        x_flat = x.reshape(B*T*N, D)
         patch_flat = self.patch_fc(x_flat)  # [B*T*N, 1]
-        patch_scores = patch_flat.view(B, T-self.lag, N)   # [B, T, N]
+        patch_scores = patch_flat.view(B, T, N)   # [B, T, N]
 
         # -----------------------------------------
         # 2. Reshape into spatial grid: [B, T, N1, N1]
         # -----------------------------------------
-        patch_grid = patch_scores.view(B, T-self.lag, N1, N1)
+        patch_grid = patch_scores.view(B, T, N1, N1)
 
         # Add channel dim → [B, 1, T, N1, N1]
         patch_grid = patch_grid.unsqueeze(1)
@@ -558,6 +639,251 @@ class PatchTemporalClassifierCNN3D(nn.Module):
         # 4. Global average pool → [B, 2]
         # -----------------------------------------
         video_scores = out3d.mean(dim=(2, 3, 4))
+        # patch_scores_prob= out3d.softmax(dim=1)[:,1,:,:,:].squeeze(1) # [B, T, N1, N1]
+        # patch_scores = patch_scores_prob.view(B, T, N)  # [B, T, N]
+        if return_patch_scores:
+            # return patch_scores as [B, T, N]
+            return video_scores, patch_scores
+
+        return video_scores
+
+class PatchClassifier3DConv_TopK(nn.Module):
+    def __init__(self, D, hidden_dim=128,topk_percent=0.1, spatio_temporal_patches=False):
+        super().__init__()
+
+        # FC per patch → 1 logit
+        self.patch_fc = nn.Sequential(
+            nn.Linear(D, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, 1)
+        )
+        self.topk_percent=topk_percent
+        self.spatio_temporal_patches=spatio_temporal_patches
+        # 3D conv aggregator
+        # input: B, 1, T, N1, N1
+        self.agg3d = nn.Sequential(
+            nn.Conv3d(
+                in_channels=1,
+                out_channels=8,
+                kernel_size=(3, 3, 3),   
+                padding=(1, 1, 1)      
+            ),
+            nn.ReLU(),
+            nn.Conv3d(8, 2, kernel_size=1)
+        )
+
+    def forward(self, x, return_patch_scores=False):
+        """
+        x: [B, T, N, D]
+        """
+        B, T, N, D = x.shape
+        N1 = int(math.sqrt(N))
+        assert N1 * N1 == N, f"N={N} is not a perfect square!"
+
+        # -----------------------------------------
+        # 1. FC per patch → patch_logits: [B, T, N, 1]
+        # -----------------------------------------
+        x_flat = x.reshape(B*T*N, D)
+        patch_flat = self.patch_fc(x_flat)  # [B*T*N, 1]
+        patch_scores = patch_flat.view(B, T, N)   # [B, T, N]
+
+        # -----------------------------------------
+        # 2. Reshape into spatial grid: [B, T, N1, N1]
+        # -----------------------------------------
+        patch_grid = patch_scores.view(B, T, N1, N1)
+
+        # Add channel dim → [B, 1, T, N1, N1]
+        patch_grid = patch_grid.unsqueeze(1)
+
+        # -----------------------------------------
+        # 3. 3D conv aggregation
+        # output: [B, 2, T, N1, N1]
+        # -----------------------------------------
+        out3d = self.agg3d(patch_grid)
+        if self.spatio_temporal_patches:
+            # breakpoint()
+            patch_scores_prob= out3d.softmax(dim=1)[:,1,:,:,:].squeeze(1) # [B, T, N1, N1]
+            patch_scores = patch_scores_prob.view(B, T, N)  # [B, T
+        
+        # Get top-k patches on out3d
+        k = max(1, int(self.topk_percent * N))
+        out3d_reshaped = out3d.view(B, 2, T, N)  # [B, 2, T, N]
+        topk_values, _ = torch.topk(out3d_reshaped, k=k, dim=-1)  # [B, 2, T, k]
+        
+        video_scores = topk_values.mean(dim=(2, 3))  # [B, 2]
+        
+
+        if return_patch_scores:
+            # return patch_scores as [B, T, N]
+            return video_scores, patch_scores
+
+        return video_scores
+    
+class PatchClS_3DConv_TopKFrame(nn.Module):
+    def __init__(self, D, hidden_dim=128,topk_percent=0.1,spatio_temporal_patches=False):
+        super().__init__()
+
+        # FC per patch → 1 logit
+        self.patch_fc = nn.Sequential(
+            nn.Linear(D, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, 1)
+        )
+        self.topk_percent=topk_percent
+        self.spatio_temporal_patches=spatio_temporal_patches
+        # 3D conv aggregator
+        # input: B, 1, T, N1, N1
+        self.agg3d = nn.Sequential(
+            nn.Conv3d(
+                in_channels=1,
+                out_channels=8,
+                kernel_size=(3, 3, 3),   
+                padding=(1, 1, 1)      
+            ),
+            nn.ReLU(),
+            nn.Conv3d(8, 2, kernel_size=1)
+        )
+
+    def forward(self, x, return_patch_scores=False):
+        """
+        x: [B, T, N, D]
+        """
+        B, T, N, D = x.shape
+        N1 = int(math.sqrt(N))
+        assert N1 * N1 == N, f"N={N} is not a perfect square!"
+
+        # -----------------------------------------
+        # 1. FC per patch → patch_logits: [B, T, N, 1]
+        # -----------------------------------------
+        x_flat = x.reshape(B*T*N, D)
+        patch_flat = self.patch_fc(x_flat)  # [B*T*N, 1]
+        patch_scores = patch_flat.view(B, T, N)   # [B, T, N]
+
+        # -----------------------------------------
+        # 2. Reshape into spatial grid: [B, T, N1, N1]
+        # -----------------------------------------
+        patch_grid = patch_scores.view(B, T, N1, N1)
+
+        # Add channel dim → [B, 1, T, N1, N1]
+        patch_grid = patch_grid.unsqueeze(1)
+
+        # -----------------------------------------
+        # 3. 3D conv aggregation
+        # output: [B, 2, T, N1, N1]
+        # -----------------------------------------
+        out3d = self.agg3d(patch_grid)
+        if self.spatio_temporal_patches:
+            patch_scores_prob= out3d.softmax(dim=1)[:,1,:,:,:].squeeze(1) # [B, T, N1, N1]
+            patch_scores = patch_scores_prob.view(B, T, N)  # [B, T
+            # patch_scores=(out3d[:,1,:,:,:] - out3d[:,0,:,:,:]).squeeze(1).view(B,T,N)
+        
+        # Get top-k patches on out3d
+        k = max(1, int(self.topk_percent * N))
+        out3d=out3d.view(B, 2, T, N)
+        # out3d: [B, 2, T, N]
+        
+        B, C, T, N = out3d.shape
+        assert C == 2
+        
+        # Softmax over class dimension
+        probs = torch.softmax(out3d, dim=1)        # [B, 2, T, N]
+
+        # Extract fake class probability
+        fake_probs = probs[:, 1:2]                  # [B, 1, T, N]
+
+        # Top-K selection based on fake probability
+        topk_probs, topk_idx = torch.topk(
+            fake_probs,
+            k=k,
+            dim=-1
+        )                                            # both: [B, 1, T, k]
+
+        topk_idx_expand = topk_idx.expand(
+            -1, C, -1, -1
+        )                                          # [B, 2, T, k]
+
+        # Gather logits from both real & fake
+        topk_logits = torch.gather(
+            out3d,
+            dim=-1,
+            index=topk_idx_expand
+        )                                        # [B, 2, T, k]
+        
+        video_scores = topk_logits.mean(dim=(2, 3))  # [B, 2]
+        
+
+        if return_patch_scores:
+            # return patch_scores as [B, T, N]
+            return video_scores, patch_scores
+
+        return video_scores
+
+class PatchClassifierCNN3D_ATTN(nn.Module):
+    def __init__(self, D, hidden_dim=128):
+        super().__init__()
+
+        # FC per patch → 1 logit
+        self.patch_fc = nn.Sequential(
+            nn.Linear(D, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, 1)
+        )
+
+        # 3D conv aggregator
+        # input: B, 1, T, N1, N1
+        self.agg3d = nn.Sequential(
+            nn.Conv3d(
+                in_channels=1,
+                out_channels=8,
+                kernel_size=(3, 3, 3),   
+                padding=(1, 1, 1)      
+            ),
+            nn.ReLU(),
+            nn.Conv3d(8, 2, kernel_size=1)
+        )
+        self.attn = nn.Conv3d(2, 1, kernel_size=1)
+
+    def forward(self, x, return_patch_scores=False):
+        """
+        x: [B, T, N, D]
+        """
+        B, T, N, D = x.shape
+        N1 = int(math.sqrt(N))
+        assert N1 * N1 == N, f"N={N} is not a perfect square!"
+
+        # -----------------------------------------
+        # 1. FC per patch → patch_logits: [B, T, N, 1]
+        # -----------------------------------------
+        x_flat = x.reshape(B*T*N, D)
+        patch_flat = self.patch_fc(x_flat)  # [B*T*N, 1]
+        patch_scores = patch_flat.view(B, T, N)   # [B, T, N]
+
+        # -----------------------------------------
+        # 2. Reshape into spatial grid: [B, T, N1, N1]
+        # -----------------------------------------
+        patch_grid = patch_scores.view(B, T, N1, N1)
+
+        # Add channel dim → [B, 1, T, N1, N1]
+        patch_grid = patch_grid.unsqueeze(1)
+
+        # -----------------------------------------
+        # 3. 3D conv aggregation
+        # output: [B, 2, T, N1, N1]
+        # -----------------------------------------
+        out3d = self.agg3d(patch_grid)
+
+        # -----------------------------------------
+        # 4. Global average pool → [B, 2]
+        # -----------------------------------------
+        attn = self.attn(out3d)                 # [B,1,T,H,W]
+
+        B, _, T, H, W = attn.shape
+
+        attn = attn.view(B, 1, -1)              # [B,1,T*H*W]
+        attn = torch.softmax(attn, dim=-1)
+        attn = attn.view(B, 1, T, H, W)          # ✅ reshape back
+
+        video_scores = (out3d * attn).sum(dim=(2,3,4))   # [B,2]
 
         if return_patch_scores:
             # return patch_scores as [B, T, N]

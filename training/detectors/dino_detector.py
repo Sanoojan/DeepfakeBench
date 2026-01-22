@@ -10,6 +10,7 @@ from .base_detector import AbstractDetector
 from detectors import DETECTOR
 from loss import LOSSFUNC
 from networks.classifiers import *
+from networks.models.dino.eva import vit_base_patch16_dinov3 as DINOv3_base_patch16
 
 logger = logging.getLogger(__name__)
 
@@ -42,14 +43,19 @@ class DINODetector(AbstractDetector):
     # Backbone
     # ------------------------------------------------
     def build_backbone(self, config):
-        model_name = config.get('dino_model', 'vit_base_patch16_dinov3')
+        
+        # careful here I am not using from the config
+        model=DINOv3_base_patch16(pretrained=True, num_classes=0, global_pool='')
+        
+        # model_name = config.get('dino_model', 'vit_base_patch16_dinov3')
 
-        model = timm.create_model(
-            model_name,
-            pretrained=True,
-            num_classes=0,     # remove classifier
-            global_pool=''     # keep CLS + patch tokens
-        )
+        # model = timm.create_model(
+        #     model_name,
+        #     pretrained=True,
+        #     num_classes=0,     # remove classifier
+        #     global_pool=''     # keep CLS + patch tokens
+        # )
+        
         return model
 
     # ------------------------------------------------
@@ -127,6 +133,24 @@ class DINODetector(AbstractDetector):
         else:
             pred = self.classifier(features)
             patch_scores = None
+        
+        if self.config.get('additional_losses', None) :
+            assert self.config['classifier'] != 'linear'
+            if 'KL_loss' in self.config['additional_losses']:
+                # return a list of predictions from different hidden states
+                pred_list = pred
+                pred = pred_list[-1]  # use the last one as the main prediction
+            elif 'All_layer_CE' in self.config['additional_losses']:
+                pred_list = pred
+                # average the predictions from different hidden states
+                pred = torch.mean(torch.stack(pred), dim=0)
+                # pred = pred_list[3] # just to check 
+                prob_list = [torch.softmax(p, dim=1)[:, 1] for p in pred_list]
+            elif 'Selected_layer_CE' in self.config['additional_losses']:
+                
+                layer_idx = self.config['Selected_layer_CE']['layer']
+                pred_list = pred
+                pred = pred_list[layer_idx]
 
         prob = torch.softmax(pred, dim=1)[:, 1]
         cls_feat = features[:, 0, :]
