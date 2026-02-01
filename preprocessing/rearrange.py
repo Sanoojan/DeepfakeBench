@@ -62,7 +62,25 @@ import json
 import yaml
 import pandas as pd
 from pathlib import Path
+from natsort import natsorted
+import numpy as np
 
+def select_fixed_num_frames(frame_paths, num_frames):
+    """
+    frame_paths: list of frame file paths
+    num_frames: target number of frames (e.g., 32)
+
+    Returns:
+        list of selected frame paths (ordered)
+    """
+    frame_paths = natsorted(frame_paths)
+    total = len(frame_paths)
+
+    if total <= num_frames:
+        return frame_paths
+
+    indices = np.linspace(0, total - 1, num_frames).astype(int)
+    return [frame_paths[i] for i in indices]
 
 def generate_dataset_file(dataset_name, dataset_root_path, output_file_path, compression_level='c23', perturbation = 'end_to_end'):
     """
@@ -490,7 +508,70 @@ def generate_dataset_file(dataset_name, dataset_root_path, output_file_path, com
                         dataset_dict[dataset_name][label]['train'][video_name] = {'label': label, 'frames': frame_paths}
                         dataset_dict[dataset_name][label]['test'][video_name] = {'label': label, 'frames': frame_paths}
                         dataset_dict[dataset_name][label]['val'][video_name] = {'label': label, 'frames': frame_paths}
+  
+    elif dataset_name == 'WildDeepfake':
+        mode = 'fixed_num_frames'
+        num_frames = 32
 
+        dataset_dict[dataset_name] = {
+            'WDF_Real': {'test': {}},
+            'WDF_Fake': {'test': {}}
+        }
+
+        root = os.path.join(dataset_root_path, 'deepfake_in_the_wild')
+
+        split_map = {
+            'real_test': ('WDF_Real', 'real'),
+            'fake_test': ('WDF_Fake', 'fake')
+        }
+
+        for split_dir, (label_name, inner_dir) in split_map.items():
+            split_path = os.path.join(root, split_dir)
+
+            if not os.path.isdir(split_path):
+                print(f"[WARN] Missing split dir: {split_path}")
+                continue
+
+            for video_dir in os.scandir(split_path):
+                if not video_dir.is_dir():
+                    continue
+
+                base_frame_dir = os.path.join(video_dir.path, inner_dir)
+
+                if not os.path.isdir(base_frame_dir):
+                    print(f"[WARN] Missing base frame dir: {base_frame_dir}")
+                    continue
+
+                # 🔑 collect frames recursively (handles extra subfolders like 0/, 11/, ...)
+                all_frames = []
+                for sub in os.scandir(base_frame_dir):
+                    if not sub.is_dir():
+                        continue
+
+                    frames = (
+                        glob.glob(os.path.join(sub.path, '*.png')) +
+                        glob.glob(os.path.join(sub.path, '*.jpg'))
+                    )
+                    all_frames.extend(frames)
+
+                if len(all_frames) == 0:
+                    print(f"[WARN] No frames found under {base_frame_dir}")
+                    continue
+
+                # Natural sort to preserve temporal order
+                all_frames = natsorted(all_frames)
+
+                video_name = f"{split_dir}_{video_dir.name}"
+
+                frame_paths = select_fixed_num_frames(
+                    all_frames,
+                    num_frames=num_frames
+                )
+
+                dataset_dict[dataset_name][label_name]['test'][video_name] = {
+                    'label': label_name,
+                    'frames': frame_paths
+                }
     # Convert the dataset dictionary to JSON format and save to file
     output_file_path = os.path.join(output_file_path, dataset_name + '.json')
     with open(output_file_path, 'w') as f:

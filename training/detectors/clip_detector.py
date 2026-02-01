@@ -85,6 +85,11 @@ class CLIPDetector(AbstractDetector):
             self.head = PatchClassifier3DConv_TopK(D=D)
         elif config['classifier'] == 'PatchClS_3DConv_TopKFrame':
             self.head = PatchClS_3DConv_TopKFrame(D=D, topk_percent=topk_percent, spatio_temporal_patches=spatio_temporal_patches)
+        elif config['classifier'] == 'PatchClS_3DConv_temp_TopKFrame':
+            self.head = PatchClS_3DConv_temp_TopKFrame(D=D, topk_percent=topk_percent, spatio_temporal_patches=spatio_temporal_patches)
+        elif config['classifier'] == 'PatchClS_3DConv_spa_TopKFrame':
+            self.head = PatchClS_3DConv_spa_TopKFrame(D=D, topk_percent=topk_percent, spatio_temporal_patches=spatio_temporal_patches)
+        
         elif config['classifier'] == 'PatchClassifier3D2Conv':
             self.head = PatchClassifier3D2Conv(D=D)
         elif config['classifier'] == 'PatchTemporalClassifierCNN3D':
@@ -110,7 +115,7 @@ class CLIPDetector(AbstractDetector):
         feat = self.backbone(data_dict['image'],output_hidden_states=True)
         return feat
 
-    def classifier(self, features: torch.tensor,return_patch_scores=False) -> torch.tensor:
+    def classifier(self, features: torch.tensor,return_patch_scores=False,return_final_patch_scores=False) -> torch.tensor:
         if self.config.get('additional_losses', None):
 
             T = self.config['clip_size']
@@ -712,7 +717,7 @@ class CLIPDetector(AbstractDetector):
         prob = torch.softmax(pred, dim=1)[:, 1]
         
         
-        if self.config.get('video_mode', False) and not(prob.shape [0] == data_dict['label'].shape[0]):
+        if self.config.get('video_mode', False) and not(prob.shape [0] == data_dict['label'].shape[0]): # carefully implement later
             # reshape the output to (B, T, C)
             T = self.config['clip_size']
             B = prob.shape[0] // T

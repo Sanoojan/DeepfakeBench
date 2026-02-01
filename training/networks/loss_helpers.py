@@ -581,12 +581,15 @@ def Patch_frame_MIL_ranking_all_loss(patch_scores, label, cfg=None, margin=1.0):
     
     margin = margin
     alpha = cfg.get('alpha', 1.0)
-
+    use_sigmoid=cfg.get('use_sigmoid', True)
 
 
     B, T, N = patch_scores.shape
     device = patch_scores.device
     topk = max(1, int(N * topk_percent))
+    
+    if use_sigmoid:
+        patch_scores = torch.sigmoid(patch_scores)
 
     # Top-K per frame
     topk_scores, _ = torch.topk(patch_scores, k=topk, dim=2)  # [B, T, K]

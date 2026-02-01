@@ -24,6 +24,7 @@ import torch.backends.cudnn as cudnn
 import torch.utils.data
 import torch.optim as optim
 from torch.utils.data.distributed import DistributedSampler
+from torch.utils.data import Sampler
 import torch.distributed as dist
 
 from optimizor.SAM import SAM
@@ -35,6 +36,7 @@ from dataset import *
 from metrics.utils import parse_metric_for_print
 from logger import create_logger, RankFilter
 import wandb
+import math
 
 
 
@@ -53,6 +55,52 @@ parser.add_argument('--test_name', type=str, default="Debug", help='specify the 
 args = parser.parse_args()
 torch.cuda.set_device(args.local_rank)
 
+class DistributedBalancedBatchSampler(Sampler):
+    def __init__(self, labels, batch_size, drop_last=True):
+        assert batch_size % 2 == 0
+
+        self.labels = labels
+        self.batch_size = batch_size
+        self.drop_last = drop_last
+
+        self.real_idx = [i for i, l in enumerate(labels) if l == 0]
+        self.fake_idx = [i for i, l in enumerate(labels) if l == 1]
+
+        self.half = batch_size // 2
+
+        if dist.is_available() and dist.is_initialized():
+            self.rank = dist.get_rank()
+            self.world_size = dist.get_world_size()
+        else:
+            self.rank = 0
+            self.world_size = 1
+
+    def __iter__(self):
+        random.shuffle(self.real_idx)
+        random.shuffle(self.fake_idx)
+
+        min_len = min(len(self.real_idx), len(self.fake_idx))
+        num_batches = min_len // self.half
+
+        # create balanced batches
+        all_batches = []
+        for i in range(num_batches):
+            r = self.real_idx[i*self.half:(i+1)*self.half]
+            f = self.fake_idx[i*self.half:(i+1)*self.half]
+            batch = r + f
+            random.shuffle(batch)
+            all_batches.append(batch)
+
+        # shard batches across GPUs
+        all_batches = all_batches[self.rank::self.world_size]
+
+        for batch in all_batches:
+            yield batch
+
+    def __len__(self):
+        min_len = min(len(self.real_idx), len(self.fake_idx))
+        total_batches = min_len // self.half
+        return math.ceil(total_batches / self.world_size)
 
 
 def init_seed(config):
@@ -103,6 +151,19 @@ def prepare_training_data(config):
                 sampler=custom_sampler, 
                 collate_fn=train_set.collate_fn,
             )
+    elif config.get('balanced_batch_sampler', False):
+        sampler = DistributedBalancedBatchSampler(
+            labels=train_set.get_labels(),
+            batch_size=config['train_batchSize'],
+        )
+
+        train_data_loader = torch.utils.data.DataLoader(
+            dataset=train_set,
+            batch_sampler=sampler,    
+            num_workers=int(config['workers']),
+            collate_fn=train_set.collate_fn,
+            pin_memory=True,
+        )
     elif config['ddp']:
         sampler = DistributedSampler(train_set)
         train_data_loader = \

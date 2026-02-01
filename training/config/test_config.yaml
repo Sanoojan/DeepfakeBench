@@ -33,6 +33,10 @@ label_dict:
   # UADFV
   UADFV_Fake: 1
   UADFV_Real: 0
+  # WildDeepfake
+  WDF_Fake: 1
+  WDF_Real: 0
+
   # Roop
   roop_Real: 0
   roop_Fake: 1

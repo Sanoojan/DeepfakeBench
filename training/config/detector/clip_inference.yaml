@@ -16,13 +16,14 @@ backbone_config:
   dropout: false
 
 # dataset
-all_dataset: [FaceForensics++, FF-F2F, FF-DF, FF-FS, FF-NT, FaceShifter, DeepFakeDetection, Celeb-DF-v1, Celeb-DF-v2, DFDCP, DFDC, DeeperForensics-1.0, UADFV]
+all_dataset: [FaceForensics++, FF-F2F, FF-DF, FF-FS, FF-NT, FaceShifter, DeepFakeDetection, Celeb-DF-v1, Celeb-DF-v2, DFDCP, DFDC, DeeperForensics-1.0, UADFV,WDF]
 train_dataset: [FaceForensics++]
-test_dataset: [FaceForensics++, Celeb-DF-v1, Celeb-DF-v2, DFDCP, DFDC, UADFV]
+test_dataset: [FaceForensics++, Celeb-DF-v1, Celeb-DF-v2, DFDCP, DFDC,DeepFakeDetection, UADFV,WDF]
 # test_dataset: [DFDC]
 
 video_mode: true
 clip_size: 32
+test_clip_size: 32
 compression: c23  # compression-level for videos
 train_batchSize: 1   # training batch size
 test_batchSize: 1  # test batch size
@@ -53,7 +54,7 @@ data_aug:
 mean: [0.48145466, 0.4578275, 0.40821073]
 std: [0.26862954, 0.26130258, 0.27577711]
 
-classifier: PatchClS_3DConv_TopKFrame  # choose between 'linear', 'PatchTemporalClassifier','ClsDiffClassifier' , 'PatchClassifierCNN3D','PatchTemporalClassifierCNN3D', 'PatchClassifier3D2Conv' and 'PatchClassifier', 'PatchClassifierCNN3D_ATTN', 'PatchClassifier3DConv_TopK'
+classifier: PatchClS_3DConv_TopKFrame  # choose between 'linear', 'PatchTemporalClassifier','ClsDiffClassifier' , 'PatchClassifierCNN3D','PatchTemporalClassifierCNN3D', 'PatchClassifier3D2Conv' and 'PatchClassifier', 'PatchClassifierCNN3D_ATTN', 'PatchClassifier3DConv_TopK', 'PatchClS_3DConv_TopKFrame'
 topk_percent: 0.1
 spatio_temporal_patches: true
 # optimizer config

@@ -5,8 +5,8 @@ log_dir: logs_debug/clip
 pretrained: /data/home/zhiyuanyan/DeepfakeBench/training/pretrained/xception-b5690688.pth   # path to a pre-trained model, if using one
 model_name: clip   # model name
 backbone_name: vit  # backbone name
-clip_backbone: openai/clip-vit-large-patch14 # options : 'openai/clip-vit-base-patch16', 'openai/clip-vit-base-patch32', 'openai/clip-vit-large-patch14'
-dim: 1024 # feature dimension of backbone
+clip_backbone: openai/clip-vit-base-patch16 # options : 'openai/clip-vit-base-patch16', 'openai/clip-vit-base-patch32', 'openai/clip-vit-large-patch14'
+dim: 768 # feature dimension of backbone
 
 #backbone setting
 backbone_config:
@@ -16,20 +16,22 @@ backbone_config:
   dropout: false
 
 # dataset
-all_dataset: [FaceForensics++, FF-F2F, FF-DF, FF-FS, FF-NT, FaceShifter, DeepFakeDetection, Celeb-DF-v1, Celeb-DF-v2, DFDCP, DFDC, DeeperForensics-1.0, UADFV]
+all_dataset: [FaceForensics++, FF-F2F, FF-DF, FF-FS, FF-NT, FaceShifter, DeepFakeDetection, Celeb-DF-v1, Celeb-DF-v2, DFDCP, DFDC, DeeperForensics-1.0, UADFV,WDF]
 train_dataset: [FaceForensics++]
-test_dataset: [FaceForensics++, Celeb-DF-v1, Celeb-DF-v2, DFDCP, DFDC, UADFV]
+test_dataset: [FaceForensics++, Celeb-DF-v1, Celeb-DF-v2, DFDCP, DFDC,WDF,DeepFakeDetection,UADFV]
+balanced_batch_sampler: false
 # test_dataset: [Celeb-DF-v1]
 
 video_mode: true
-clip_size: 16
+clip_size: 8
+test_clip_size: 8
 compression: c23  # compression-level for videos
-train_batchSize: 4   # training batch size
-test_batchSize: 4 # test batch size
+train_batchSize: 8   # training batch size
+test_batchSize: 8   # test batch size
 workers: 8   # number of data loading workers
 frame_num: {'train': 32, 'test': 32}   # number of frames to use per video in training and testing
 resolution: 224   # resolution of output image to network
-with_mask: true   # whether to include mask information in the input
+with_mask: false   # whether to include mask information in the input
 with_landmark: false   # whether to include facial landmark information in the input
 with_flow: false   # whether to include optical flow information in the input
 
@@ -64,7 +66,7 @@ optimizer:
   type: adam
   adam:
     # lr: 0.000005 # learning rate
-    lr: 0.0005  # learning rate # classiafier only 0.0005  # full model 0.000005
+    lr: 0.0002  # learning rate # classiafier only 0.0005  # full model 0.000005
     beta1: 0.9  # beta1 for Adam optimizer
     beta2: 0.999 # beta2 for Adam optimizer
     eps: 0.00000001  # epsilon for Adam optimizer
@@ -148,8 +150,10 @@ Patch_frame_MIL_ranking:
 
 Patch_frame_MIL_ranking_all:
   alpha: 1.0
-  margin: 1.0
+  margin: 0.4
   use_variable_margin: true
+  max_margin: 0.9
+  min_margin: 0.1
   use_sigmoid: false
   topk_percent: 0.1
 

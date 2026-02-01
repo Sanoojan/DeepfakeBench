@@ -442,6 +442,9 @@ class Trainer(object):
             if self.config['save_ckpt'] and key not in FFpp_pool:
                 self.save_ckpt('test', key, f"{epoch}+{iteration}")
             self.save_metrics('test', metric_one_dataset, key)
+            for k, v in metric_one_dataset.items():
+                wandb.log({f"test_best_overall/{key}_{k}": v, "epoch": epoch, "iteration": iteration, "step": step})
+            
         if losses_one_dataset_recorder is not None:
             # info for each dataset
             loss_str = f"dataset: {key}    step: {step}    "
@@ -481,6 +484,7 @@ class Trainer(object):
         metrics_all_datasets = {}
         best_metrics_per_dataset = defaultdict(dict)  # best metric for each dataset, for each metric
         avg_metric = {'acc': 0, 'auc': 0, 'eer': 0, 'ap': 0,'video_auc': 0,'dataset_dict':{}}
+        ood_avg_metric = {'acc': 0, 'auc': 0, 'eer': 0, 'ap': 0,'video_auc': 0,'dataset_dict':{}}
         # testing for all test data
         keys = test_data_loaders.keys()
         for key in keys:
@@ -498,7 +502,10 @@ class Trainer(object):
             for metric_name, value in metric_one_dataset.items():
                 if metric_name in avg_metric:
                     avg_metric[metric_name]+=value
+                if metric_name in avg_metric and key not in FFpp_pool:
+                    ood_avg_metric[metric_name]+=value
             avg_metric['dataset_dict'][key] = metric_one_dataset[self.metric_scoring]
+            ood_avg_metric['dataset_dict'][key] = metric_one_dataset[self.metric_scoring]
             if type(self.model) is AveragedModel:
                 metric_str = f"Iter Final for SWA:    "
                 for k, v in metric_one_dataset.items():
@@ -513,6 +520,11 @@ class Trainer(object):
                 if key != 'dataset_dict':
                     avg_metric[key] /= len(keys)
             self.save_best(epoch, iteration, step, None, 'avg', avg_metric)
+            
+            for key in ood_avg_metric:
+                if key != 'dataset_dict':
+                    ood_avg_metric[key] /= (len(keys)-1) # Exclude FaceForensics++
+            self.save_best(epoch, iteration, step, None, 'ood_avg', ood_avg_metric)
 
         self.logger.info('===> Test Done!')
         return self.best_metrics_all_time  # return all types of mean metrics for determining the best ckpt

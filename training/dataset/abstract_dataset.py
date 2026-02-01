@@ -63,7 +63,12 @@ class DeepfakeAbstractBaseDataset(data.Dataset):
 
         # Check if 'video_mode' exists in config, otherwise set video_level to False
         self.video_level = config.get('video_mode', False)
-        self.clip_size = config.get('clip_size', None)
+        if mode=='train':
+            
+            self.clip_size = config.get('clip_size', None)
+        else:
+            self.clip_size = config.get('test_clip_size', None)
+        
         self.lmdb = config.get('lmdb', False)
         # Dataset dictionary
         self.image_list = []
@@ -136,6 +141,9 @@ class DeepfakeAbstractBaseDataset(data.Dataset):
         rescaled_landmarks = landmarks * scale_factor
         return rescaled_landmarks
 
+    def get_labels(self):
+        # one label per video/clip
+        return self.label_list
 
     def collect_img_and_label_for_one_dataset(self, dataset_name: str):
         """Collects image and label lists.

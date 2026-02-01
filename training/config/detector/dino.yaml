@@ -14,16 +14,17 @@ backbone_config:
   dropout: false
 
 # DINO backbone
-dino_model: vit_base_patch16_dinov3
-feat_dim: 768
+dino_model: vit_large_patch16_dinov3 # not implemented correctly inside. For now hard coded
+feat_dim: 1024
 
 # dataset
-all_dataset: [FaceForensics++, FF-F2F, FF-DF, FF-FS, FF-NT, FaceShifter, DeepFakeDetection, Celeb-DF-v1, Celeb-DF-v2, DFDCP, DFDC, DeeperForensics-1.0, UADFV]
+aall_dataset: [FaceForensics++, FF-F2F, FF-DF, FF-FS, FF-NT, FaceShifter, DeepFakeDetection, Celeb-DF-v1, Celeb-DF-v2, DFDCP, DFDC, DeeperForensics-1.0, UADFV,WDF]
 train_dataset: [FaceForensics++]
-test_dataset: [FaceForensics++, Celeb-DF-v1, Celeb-DF-v2, DFDCP, DFDC, UADFV]
+test_dataset: [FaceForensics++, Celeb-DF-v1, Celeb-DF-v2, DFDCP, DFDC,WDF,DeepFakeDetection,UADFV]
 
 video_mode: true
-clip_size: 16
+clip_size: 8
+test_clip_size: 8
 compression: c23
 train_batchSize: 8
 test_batchSize: 8
@@ -32,6 +33,7 @@ frame_num: {'train': 32, 'test': 32}
 resolution: 256
 with_mask: false
 with_landmark: false
+with_flow: false   
 
 # data augmentation
 use_data_augmentation: true
@@ -51,15 +53,16 @@ data_aug:
 mean: [0.485, 0.456, 0.406]
 std: [0.229, 0.224, 0.225]
 
-classifier: linear # choose between 'linear', 'PatchTemporalClassifier','ClsDiffClassifier' , 'PatchClassifierCNN3D','PatchTemporalClassifierCNN3D' and 'PatchClassifier'
-
+classifier: PatchClS_3DConv_TopKFrame  # choose between 'linear', 'PatchTemporalClassifier','ClsDiffClassifier' , 'PatchClassifierCNN3D','PatchTemporalClassifierCNN3D', 'PatchClassifier3D2Conv' and 'PatchClassifier', 'PatchClassifierCNN3D_ATTN', 'PatchClassifier3DConv_TopK'
+topk_percent: 0.1
+spatio_temporal_patches: true  # whether to use spatio-temporal patches in PatchClassifier3DConv_TopK
 
 # optimizer config
 optimizer:
-  calssifier_only: true
+  classifier_only: true
   type: adam
   adam:
-    lr: 0.001
+    lr: 0.0002
     beta1: 0.9
     beta2: 0.999
     eps: 0.00000001
@@ -81,12 +84,70 @@ save_feat: true
 loss_func: cross_entropy
 losstype: null
 
-Additional_losses: []  # additional loss functions to use {options: [KL_loss, Selected_layer_CE, All_layer_CE]}
+additional_losses: [All_layer_CE,Patch_frame_MIL_ranking_all] # additional loss functions to use {options: [KL_loss, Selected_layer_CE, All_layer_CE]}
 KL_loss:
   temperature: 2.0
   alpha: 0.5
 Selected_layer_CE:
-  layer: 11
+  layer: 0
+Patch_MIL:
+  alpha: 0.5
+  mil_type: topk
+  k: 5
+Patch_Xray_CE:
+  alpha: 0.5
+  xray_importance: 2.0
+  k: 5
+Patch_Temporal_Xray:
+  alpha: 0.2
+  window: 3        # temporal window size
+  k: 5  
+Patch_Xray:
+  alpha: 0.3        # moderate auxiliary strength
+  k: 10             # top-K patches × frames (MIL)  
+Patch_consistency_loss:
+  alpha: 0.1
+  window: 3
+  use_sigmoid_weight: false
+  use_variance: false
+  variance_weight: 1.0
+  use_difference: false
+  use_corr: true
+  corr_weight: 1.0
+  fake_patch_only: false
+  fake_topk: 30
+  fake_thresh: none
+Patch_frame_CE:
+  alpha: 0.5
+  topk_percent: 0.2
+All_layer_CE:
+  ranking_margin: 1.0
+  use_ranking_loss: false
+  use_mean_pred: true
+  CE_alpha: 0.0
+Patch_continuity_loss:
+  alpha: 0.02
+  topk: 5
+  spatial_radius: 1
+Patch_continuity_flow_loss:
+  alpha: 0.02 
+  conf_thresh: 0.6
+Patch_frame_MIL_ranking:
+  alpha: 1.0
+  margin: 1.0
+  use_variable_margin: true
+  use_sigmoid: false
+  random_pairs: 500
+
+Patch_frame_MIL_ranking_all:
+  alpha: 1.0
+  margin: 0.4
+  use_variable_margin: true
+  max_margin: 0.9
+  min_margin: 0.1
+  use_sigmoid: false
+  topk_percent: 0.1
+
 
 # metric
 metric_scoring: auc
@@ -95,3 +156,5 @@ metric_scoring: auc
 cuda: true
 cudnn: true
 visualize_patchwise: true
+
+apply_layernorm: true 
